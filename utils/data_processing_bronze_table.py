@@ -14,13 +14,16 @@ import argparse
 from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
 
-
-def process_bronze_table(snapshot_date_str, bronze_lms_directory, spark):
+def process_bronze_table(snapshot_date_str, bronze_lms_directory, spark, csv_file_path):
     # prepare arguments
     snapshot_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d")
+    snapshot_path = os.path.join(bronze_lms_directory, snapshot_date.strftime("%Y-%m-%d"))
+
+    if not os.path.exists(snapshot_path):
+        os.makedirs(snapshot_path)
     
     # connect to source back end - IRL connect to back end source system
-    csv_file_path = "data/lms_loan_daily.csv"
+    # csv_file_path = "data/lms_loan_daily.csv"
 
     # load data - IRL ingest from back end source system
     df = spark.read.csv(csv_file_path, header=True, inferSchema=True).filter(col('snapshot_date') == snapshot_date)
@@ -28,8 +31,7 @@ def process_bronze_table(snapshot_date_str, bronze_lms_directory, spark):
 
     # save bronze table to datamart - IRL connect to database to write
     partition_name = "bronze_loan_daily_" + snapshot_date_str.replace('-','_') + '.csv'
-    filepath = bronze_lms_directory + partition_name
-    df.toPandas().to_csv(filepath, index=False)
+    df.toPandas().to_csv(snapshot_path, index=False)
     print('saved to:', filepath)
 
     return df
