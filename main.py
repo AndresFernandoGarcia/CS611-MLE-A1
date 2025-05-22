@@ -13,9 +13,14 @@ import pyspark.sql.functions as F
 from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
 
+
+# Could be all one file for each table
 import utils.data_processing_bronze_table
+import utils.data_processing_bronze_table_label
 import utils.data_processing_silver_table
+import utils.data_processing_silver_table_label
 import utils.data_processing_gold_table
+import utils.data_processing_gold_table_label
 
 # Initialize SparkSession
 spark = pyspark.sql.SparkSession.builder \
@@ -59,53 +64,53 @@ def generate_first_of_month_dates(start_date_str, end_date_str):
 dates_str_lst = generate_first_of_month_dates(start_date_str, end_date_str)
 print(dates_str_lst)
 
-# # create bronze datalake
-# bronze_lms_directory = "datamart/bronze/features/"
+# -------Processing Bronze Label Store-------
+# create bronze datalake
+bronze_lms_directory = "datamart/bronze/lms/"
 
-# if not os.path.exists(bronze_lms_directory):
-#     os.makedirs(bronze_lms_directory)
+if not os.path.exists(bronze_lms_directory):
+    os.makedirs(bronze_lms_directory)
 
 # run bronze backfill
-# for date_str in dates_str_lst:
-#     utils.data_processing_bronze_table.process_bronze_table(spark)
-
+for date_str in dates_str_lst:
+    utils.data_processing_bronze_table_label.process_bronze_table(date_str, bronze_lms_directory, spark)
 
 # -------Processing Bronze Feature Store-------
 utils.data_processing_bronze_table.process_bronze_table(spark)
 
-# create silver datalake
-# silver_loan_daily_directory = "datamart/silver/features"
 
-# if not os.path.exists(silver_loan_daily_directory):
-#     os.makedirs(silver_loan_daily_directory)
+# -------Processing Silver Label Store-------
+# create silver datalake
+silver_loan_daily_directory = "datamart/silver/loan_daily/"
+
+if not os.path.exists(silver_loan_daily_directory):
+    os.makedirs(silver_loan_daily_directory)
 
 # run silver backfill
-# for date_str in dates_str_lst:
-#     utils.data_processing_silver_table.process_silver_table(date_str, silver_loan_daily_directory, spark)
+for date_str in dates_str_lst:
+    utils.data_processing_silver_table_label.process_silver_table(date_str, bronze_lms_directory, silver_loan_daily_directory, spark)
 
 # -------Processing Silver Feature Store-------
 utils.data_processing_silver_table.process_silver_table(spark)
 
-# # create gold datalake
-# gold_label_store_directory = "datamart/gold/feature_store/"
 
-# if not os.path.exists(gold_label_store_directory):
-#     os.makedirs(gold_label_store_directory)
+# -------Processing Gold Label Store-------
+# create gold datalake
+gold_label_store_directory = "datamart/gold/label_store/"
 
-# # run gold backfill
-# for date_str in dates_str_lst:
-#     utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
+if not os.path.exists(gold_label_store_directory):
+    os.makedirs(gold_label_store_directory)
+
+# run gold backfill
+for date_str in dates_str_lst:
+    utils.data_processing_gold_table_label.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
 
 # -------Processing Gold Feature Store-------
-# utils.data_processing_gold_table.process_labels_gold_table(spark)
+utils.data_processing_gold_table.process_labels_gold_table(spark)
 
-# folder_path = gold_label_store_directory
-# files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
-# df = spark.read.option("header", "true").parquet(*files_list)
-# print("row_count:",df.count())
+folder_path = gold_label_store_directory
+files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
+df = spark.read.option("header", "true").parquet(*files_list)
+print("row_count:",df.count())
 
-# df.show()
-
-
-
-    
+df.show()

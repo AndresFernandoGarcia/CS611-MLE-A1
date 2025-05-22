@@ -17,8 +17,8 @@ def process_labels_gold_table(spark):
     
     gold_directory = "datamart/gold/feature_store"
 
-    if not os.path.exists(silver_directory):
-        os.makedirs(silver_directory)
+    if not os.path.exists(gold_directory):
+        os.makedirs(gold_directory)
 
     silver_directory = "datamart/silver/features"
 
@@ -36,17 +36,19 @@ def process_labels_gold_table(spark):
             df_attr = feature_encode(df, ["Occupation"])
 
         elif(base_name == "features_financials"):
-            df_finance = feature_encode(df, ["Credit Mix", "Payment_of_Min_Amount", "Payment_Behaviour"])
+            df_finance = feature_encode(df, ["Credit_Mix", "Payment_of_Min_Amount", "Payment_Behaviour"])
 
         elif(base_name == "feature_clickstream_last"):
             df_click = df
     # Join tables into one
 
-    # save gold table - IRL connect to database to write
-    partition_name = "SOMETHING_ELSE_FOR_NOW" + '_' + '.csv'
+    df_combined = df_finance.join(df_attr, on="Customer_ID", how="outer")
+    df_combined = df_combined.join(df_click, on="Customer_ID", how="outer")
+    
+    # Save gold table - IRL connect to database to write
+    partition_name = "feature_store" + '.csv'
     output_file = os.path.join(gold_directory, partition_name)
-
-    df.toPandas().to_csv(output_file, index=False)
+    df_combined.toPandas().to_csv(output_file, index=False)
     print('saved to:', output_file)
     
     return df
