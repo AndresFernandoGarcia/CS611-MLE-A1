@@ -7,7 +7,7 @@ import random
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import pyspark.sql.functions as F
-import argparse
+from pyspark.ml.feature import StringIndexer # for encoding
 
 from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
@@ -28,9 +28,19 @@ def process_labels_gold_table(spark):
     for file in csv_files:
         file_path = os.path.join(silver_directory, file)
         base_name = os.path.splitext(file)[0]
-        print(base_name)
 
         df = spark.read.csv(file_path, header=True, inferSchema=True)
+        print(f"  - Loaded {file} with {df.count()} rows")
+        
+        if(base_name == "features_attributes"):
+            df_attr = feature_encode(df, ["Occupation"])
+
+        elif(base_name == "features_financials"):
+            df_finance = feature_encode(df, ["Credit Mix", "Payment_of_Min_Amount", "Payment_Behaviour"])
+
+        elif(base_name == "feature_clickstream_last"):
+            df_click = df
+    # Join tables into one
 
     # save gold table - IRL connect to database to write
     partition_name = "SOMETHING_ELSE_FOR_NOW" + '_' + '.csv'
@@ -39,4 +49,20 @@ def process_labels_gold_table(spark):
     df.toPandas().to_csv(output_file, index=False)
     print('saved to:', output_file)
     
+    return df
+
+def feature_encode(df, column):
+    for item in column: 
+        outputc = item + "_Encoded"
+        indexer = StringIndexer(
+            inputCol= item,
+            outputCol= outputc,
+            handleInvalid="keep"
+        )
+
+        model = indexer.fit(df)
+        df = model.transform(df)
+
+        df = df.withColumn(item, col(outputc).cast(IntegerType()))
+        df = df.drop(outputc) # Converted already so can be dropped
     return df

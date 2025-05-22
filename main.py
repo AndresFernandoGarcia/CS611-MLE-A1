@@ -70,9 +70,8 @@ print(dates_str_lst)
 #     utils.data_processing_bronze_table.process_bronze_table(spark)
 
 
-
+# -------Processing Bronze Feature Store-------
 utils.data_processing_bronze_table.process_bronze_table(spark)
-
 
 # create silver datalake
 # silver_loan_daily_directory = "datamart/silver/features"
@@ -84,7 +83,7 @@ utils.data_processing_bronze_table.process_bronze_table(spark)
 # for date_str in dates_str_lst:
 #     utils.data_processing_silver_table.process_silver_table(date_str, silver_loan_daily_directory, spark)
 
-
+# -------Processing Silver Feature Store-------
 utils.data_processing_silver_table.process_silver_table(spark)
 
 # # create gold datalake
@@ -97,7 +96,8 @@ utils.data_processing_silver_table.process_silver_table(spark)
 # for date_str in dates_str_lst:
 #     utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
 
-utils.data_processing_gold_table.process_labels_gold_table(spark)
+# -------Processing Gold Feature Store-------
+# utils.data_processing_gold_table.process_labels_gold_table(spark)
 
 # folder_path = gold_label_store_directory
 # files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]

@@ -1,24 +1,11 @@
 import os
-import glob
-import pandas as pd
-import matplotlib.pyplot as plt
-import numpy as np
-import random
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
-import pprint
-import pyspark as spark
 import pyspark.sql.functions as F
-import argparse
-
 from pyspark.sql.window import Window
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col, sum as Fsum
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
 from pyspark.sql.functions import col, regexp_replace, regexp_extract, when, lit, coalesce, round as Fround, row_number, desc
-import re
 
 def process_silver_table(spark):
-    
     silver_directory = "datamart/silver/features"
 
     if not os.path.exists(silver_directory):
@@ -30,7 +17,6 @@ def process_silver_table(spark):
     for file in csv_files:
         file_path = os.path.join(bronze_directory, file)
         base_name = os.path.splitext(file)[0]
-        print(base_name)
 
         df = spark.read.csv(file_path, header=True, inferSchema=True)
         print(f"  - Loaded {file} with {df.count()} rows")
@@ -44,21 +30,21 @@ def process_silver_table(spark):
         elif(base_name == "feature_clickstream"):
             df = clean_clickstream(df)
 
-        # elif(table_name == "lms_loan_daily_"):
-        #     df = clean_loan_daily(df)
-        #     df_t = loan_daily_get_last_snap(df)
-        #     partition_name = table_name + '_' + snapshot_date_str.replace('-', '_') + '_clean.csv'
-        #     output_file = os.path.join(silver_snapshot_folder, partition_name)
-        #     df_t.toPandas().to_csv(output_file, index=False)
-        #     print('saved to:', output_file)
-        
+            # Cleaning clickstream to condense one to many relationship
+            df_t = clickstream_get_latest_snap(df)
+
+            # Saving last snapshot
+            partition_name = "feature_clickstream_last" + '.csv'
+            output_file = os.path.join(silver_directory, partition_name)
+            df_t.toPandas().to_csv(output_file, index=False)
+            print('saved to:', output_file)
+
         # save silver table to datamart - IRL connect to database to write
-        partition_name = base_name + '_' + '.csv'
+        partition_name = base_name + '.csv'
         output_file = os.path.join(silver_directory, partition_name)
 
         df.toPandas().to_csv(output_file, index=False)
         print('saved to:', output_file)
-
     return True
 
 def clean_financials(df):
@@ -205,28 +191,46 @@ def clean_clickstream(df):
     "Customer_ID": StringType(),
     "snapshot_date": DateType(),
 }
-        
+    
     # Enforce schema / data type
     for column, new_type in column_type_map.items():
         df = df.withColumn(column, col(column).cast(new_type))
 
     return df
 
-# def loan_daily_get_last_snap(df):
-#     # Ensure snapshot_date is a DateType (to avoid errors in future)
-#     df = df.withColumn("snapshot_date", col("snapshot_date").cast(DateType()))
+def clickstream_get_latest_snap(df):
+    # Ensure snapshot_date is a DateType (to avoid errors in future)
+    df = df.withColumn("snapshot_date", col("snapshot_date").cast(DateType()))
 
-#     # Partition by Customer_ID, order by snapshot_date descending
-#     w = Window.partitionBy("Customer_ID").orderBy(desc("snapshot_date"))
+    # Partition by Customer_ID, order by snapshot_date descending
+    w = Window.partitionBy("Customer_ID").orderBy(desc("snapshot_date"))
 
-#     # Ranking records
-#     df = df.withColumn("row_num", row_number().over(w))
+    # Ranking records
+    df = df.withColumn("row_num", row_number().over(w))
 
-#     # Get the number 1 record (which should be latest)
-#     df_latest = df.filter(col("row_num") == 1).drop("row_num")
+    # Get the number 1 record (which should be latest)
+    df_latest = df.filter(col("row_num") == 1).drop("row_num")
 
-#     return df_latest
+    return df_latest
 
+# Aggregate values of each Customer_ID in clickstream for a better representation of values
+# Doesn't work... more of a proof of concept (could be implemented at a later stage)
+def clickstream_feature_aggregation(df):
+    # Cast snapshot_date to DateType (as a precaution)
+    df = df.withColumn("snapshot_date", col("snapshot_date").cast(DateType()))
+
+    # Get all columns that are integers
+    int_cols = [
+        f.name for f in df.schema.fields
+        if isinstance(f.dataType, IntegerType) 
+        and f.name not in ["Customer_ID", "snapshot_date"]
+    ]
+
+    # Group by Customer_ID and sum all numeric fields
+    agg_exprs = [Fsum(col(c)).alias(c) for c in int_cols]
+    df_agg = df.groupBy("Customer_ID").agg(*agg_exprs)
+
+    return df_agg
 
 
 # def clean_loan_daily(df):
