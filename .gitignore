@@ -188,3 +188,6 @@ __pycache__/
 
 # Ignore datamart to save space
 datamart/
+
+#Mac specific files
+.DS_Store

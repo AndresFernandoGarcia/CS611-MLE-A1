@@ -7,87 +7,93 @@ import random
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import pprint
-import pyspark
+import pyspark as spark
 import pyspark.sql.functions as F
 import argparse
 
+from pyspark.sql.window import Window
 from pyspark.sql.functions import col
 from pyspark.sql.types import StringType, IntegerType, FloatType, DateType
+from pyspark.sql.functions import col, regexp_replace, regexp_extract, when, lit, coalesce, round as Fround, row_number, desc
+import re
 
-
-def process_silver_table(snapshot_date_str, bronze_lms_directory, silver_loan_daily_directory, spark):
-    # prepare arguments
-    snapshot_date = datetime.strptime(snapshot_date_str, "%Y-%m-%d")
+def process_silver_table(spark):
     
-    # connect to bronze table
-    partition_name = "bronze_loan_daily_" + snapshot_date_str.replace('-','_') + '.csv'
-    filepath = bronze_lms_directory + partition_name
-    df = spark.read.csv(filepath, header=True, inferSchema=True)
-    print('loaded from:', filepath, 'row count:', df.count())
+    silver_directory = "datamart/silver/features"
 
-    # clean data: enforce schema / data type
-    # Dictionary specifying columns and their desired datatypes
+    if not os.path.exists(silver_directory):
+        os.makedirs(silver_directory)
+
+    bronze_directory = "datamart/bronze/features"
+    csv_files = [f for f in os.listdir(bronze_directory) if f.endswith(".csv")]
+
+    for file in csv_files:
+        file_path = os.path.join(bronze_directory, file)
+        base_name = os.path.splitext(file)[0]
+        print(base_name)
+
+        df = spark.read.csv(file_path, header=True, inferSchema=True)
+        print(f"  - Loaded {file} with {df.count()} rows")
+
+        if(base_name == "features_attributes"):
+            df = clean_attr(df)
+
+        elif(base_name == "features_financials"):
+            df = clean_financials(df)
+
+        elif(base_name == "feature_clickstream"):
+            df = clean_clickstream(df)
+
+        # elif(table_name == "lms_loan_daily_"):
+        #     df = clean_loan_daily(df)
+        #     df_t = loan_daily_get_last_snap(df)
+        #     partition_name = table_name + '_' + snapshot_date_str.replace('-', '_') + '_clean.csv'
+        #     output_file = os.path.join(silver_snapshot_folder, partition_name)
+        #     df_t.toPandas().to_csv(output_file, index=False)
+        #     print('saved to:', output_file)
+        
+        # save silver table to datamart - IRL connect to database to write
+        partition_name = base_name + '_' + '.csv'
+        output_file = os.path.join(silver_directory, partition_name)
+
+        df.toPandas().to_csv(output_file, index=False)
+        print('saved to:', output_file)
+
+    return True
+
+def clean_financials(df):
+
+    # Creating dictionary to enforce types
     column_type_map = {
-        "loan_id": StringType(),
         "Customer_ID": StringType(),
-        "loan_start_date": DateType(),
-        "tenure": IntegerType(),
-        "installment_num": IntegerType(),
-        "loan_amt": FloatType(),
-        "due_amt": FloatType(),
-        "paid_amt": FloatType(),
-        "overdue_amt": FloatType(),
-        "balance": FloatType(),
+        "Annual_Income": FloatType(),
+        "Monthly_Inhand_Salary": FloatType(),
+        "Num_Bank_Accounts": IntegerType(),
+        "Num_Credit_Card": IntegerType(),
+        "Interest_Rate": IntegerType(),
+        "Num_of_Loan": IntegerType(),
+        "Delay_from_due_date": IntegerType(),
+        "Num_of_Delayed_Payment": IntegerType(),
+        "Changed_Credit_Limit": IntegerType(),
+        "Num_Credit_Inquiries": IntegerType(),
+        "Credit_Mix": StringType(),
+        "Outstanding_Debt": FloatType(),
+        "Credit_Utilization_Ratio": FloatType(),
+        "Credit_History_Age_Num": IntegerType(),
+        "Payment_of_Min_Amount": StringType(),
+        "Total_EMI_per_month": FloatType(),
+        "Amount_invested_monthly": FloatType(),
+        "Monthly_Balance": FloatType(),
         "snapshot_date": DateType(),
     }
 
-    for column, new_type in column_type_map.items():
-        df = df.withColumn(column, col(column).cast(new_type))
+    # Clean Annual_Income and Monthly_Inhand_Salary
+    for income_col in ["Annual_Income", "Monthly_Inhand_Salary"]:
+        df = df.withColumn(income_col, regexp_replace(col(income_col).cast("string"), r"\D+$", ""))
+        df = df.withColumn(income_col, col(income_col).cast("float"))
+        df = df.withColumn(income_col, Fround(col(income_col)).cast("int"))
 
-    # augment data: add month on book
-    df = df.withColumn("mob", col("installment_num").cast(IntegerType()))
-
-    # augment data: add days past due
-    df = df.withColumn("installments_missed", F.ceil(col("overdue_amt") / col("due_amt")).cast(IntegerType())).fillna(0)
-    df = df.withColumn("first_missed_date", F.when(col("installments_missed") > 0, F.add_months(col("snapshot_date"), -1 * col("installments_missed"))).cast(DateType()))
-    df = df.withColumn("dpd", F.when(col("overdue_amt") > 0.0, F.datediff(col("snapshot_date"), col("first_missed_date"))).otherwise(0).cast(IntegerType()))
-
-    # save silver table - IRL connect to database to write
-    partition_name = "silver_loan_daily_" + snapshot_date_str.replace('-','_') + '.parquet'
-    filepath = silver_loan_daily_directory + partition_name
-    df.write.mode("overwrite").parquet(filepath)
-    # df.toPandas().to_parquet(filepath,
-    #           compression='gzip')
-    print('saved to:', filepath)
-    
-    return df
-
-def process_silver_table():
-
-    # Features_Attributes
-    # Replace Age values that are between 0 and 130
-    # And All the values that have an _ at the end of their number are removed (or a decimal place)
-    
-    attr_df = attr_df[attr_df["Age"].notnull()]
-    attr_df["Age"] = attr_df["Age"].astype(str).str.replace(r"\D", "", regex=True).astype(int)
-    attr_df = attr_df[(attr_df["Age"] >= 0) & (attr_df["Age"] <= 130)]
-    attr_df["Age"]
-    
-    # Replace non occupations with unknown
-    attr_df["Occupation"] = attr_df["Occupation"].apply(lambda x: "Unknown" if pd.isnull(x) or not str(x)[0].isalpha() else x)
-    
-    attr_df = attr_df.drop(columns=["Name", "SSN"])
-
-    finance_df["Annual_Income"] = finance_df["Annual_Income"].astype(str).str.replace(r"\D$", "", regex=True).astype(float)
-    finance_df["Annual_Income"] = finance_df["Annual_Income"].round().astype(int)
-
-    finance_df["Monthly_Inhand_Salary"] = finance_df["Monthly_Inhand_Salary"].astype(str).str.replace(r"\D$", "", regex=True).astype(float)
-    finance_df["Monthly_Inhand_Salary"] = finance_df["Monthly_Inhand_Salary"].round().astype(int)
-
-    float_cols = [
-        "Changed_Credit_Limit", "Outstanding_Debt", "Total_EMI_per_month", 
-        "Amount_invested_monthly", "Monthly_Balance", "Credit_Utilization_Ratio"]
-
+    # Clean numeric columns with upper bounds
     col_upper_bounds = {
         "Num_of_Loan": 10,
         "Interest_Rate": 50,
@@ -98,58 +104,158 @@ def process_silver_table():
         "Num_Credit_Inquiries": 50
     }
 
-    for col, upper_bound in col_upper_bounds.items():
-        # Remove nulls and empty strings
-        finance_df = finance_df[finance_df[col].notnull() & (finance_df[col].astype(str).str.strip() != "")]
+    # Clean integer columns - (columns with integer values) - require same processing
+    for col_name, upper in col_upper_bounds.items():
+        df = df.withColumn(col_name, regexp_replace(col(col_name).cast("string"), r"[^\d.]+", ""))
+        df = df.withColumn(col_name, col(col_name).cast("float"))
+        df = df.withColumn(col_name, Fround(col(col_name)).cast("int"))
+        df = df.filter(col(col_name).isNotNull() & (col(col_name) >= 0) & (col(col_name) <= upper))
 
-        # Remove trailing non-digit characters
-        finance_df[col] = finance_df[col].astype(str).str.replace(r"\D+$", "", regex=True)
+    # Clean float columns - (columns with float values)
+    float_cols = [
+        "Changed_Credit_Limit", "Outstanding_Debt", "Total_EMI_per_month", 
+        "Amount_invested_monthly", "Monthly_Balance", "Credit_Utilization_Ratio"
+    ]
 
-        # Convert to float and round to 0 decimals
-        finance_df[col] = pd.to_numeric(finance_df[col], errors="coerce").round(0)
+    for col_name in float_cols:
+        df = df.withColumn(col_name, regexp_replace(col(col_name).cast("string"), r"\D+$", ""))
+        df = df.withColumn(col_name, regexp_replace(col(col_name), r"^\D+", ""))
+        df = df.withColumn(col_name, col(col_name).cast("float"))
+        df = df.filter(col(col_name).isNotNull() & (col(col_name) >= 0))
+        df = df.withColumn(col_name, Fround(col(col_name), 2))
 
-        # Drop rows where conversion failed
-        finance_df = finance_df[finance_df[col].notnull()]
+    # Extract Credit_History_Age into numeric
+    df = df.withColumn("year_val", regexp_extract(col("Credit_History_Age"), r"(?i)(\d+)\s*year", 1).cast("float"))
+    df = df.withColumn("month_val", regexp_extract(col("Credit_History_Age"), r"(?i)(\d+)\s*month", 1).cast("float"))
+    df = df.withColumn("Credit_History_Age_Num",
+        (coalesce(col("year_val"), lit(0)) * 365 + coalesce(col("month_val"), lit(0)) * 30).cast("int")
+    )
 
-        # Convert to int
-        finance_df[col] = finance_df[col].astype(int)
+    # Clean Credit_Mix 
+    df = df.filter(col("Credit_Mix").isNotNull())
+    df = df.withColumn("Credit_Mix", when(~col("Credit_Mix").rlike(r"^[A-Za-z]"), "Unknown").otherwise(col("Credit_Mix")))
 
-        # Filter valid ranges
-        finance_df = finance_df[(finance_df[col] >= 0) & (finance_df[col] <= upper_bound)]
+    # Clean Payment_Behaviour
+    df = df.filter(col("Payment_Behaviour").isNotNull())
+    df = df.withColumn("Payment_Behaviour", when(~col("Payment_Behaviour").rlike(r"^[A-Za-z]"), "Unknown").otherwise(col("Payment_Behaviour")))
 
-    for col in float_cols:
-        # Remove trailing _
-        finance_df[col] = finance_df[col].astype(str).str.replace(r"\D+$", "", regex=True)
-        finance_df[col] = finance_df[col].astype(str).str.replace(r"^\D+", "", regex=True)
+    # Drop unused columns
+    df = df.drop("Type_of_Loan", "Credit_History_Age", "year_val", "month_val")
 
-        # Dropping null or empty values
-        finance_df = finance_df[finance_df[col].notnull() & (finance_df[col].str.strip() != "")]
+    # Enforce schema / data type
+    for column, new_type in column_type_map.items():
+        df = df.withColumn(column, col(column).cast(new_type))
 
-        finance_df[col] = finance_df[col].astype(float)
+    return df
 
-        # Round to 2 sf
-        finance_df[col] = finance_df[col].round(2)
+def clean_attr(df):
+    column_type_map = {
+        "Customer_ID": StringType(),
+        "Age": IntegerType(),
+        "Occupation": StringType(),
+        "snapshot_date": DateType(),
+    }
 
-        # Ensure that the values are >= 0
-        finance_df = finance_df[finance_df[col] >= 0]
+    # Remove nulls in Age
+    df = df.filter(col("Age").isNotNull())
 
+    # Remove non-digit characters (underscores, letters, dots, etc.) from Age
+    df = df.withColumn("Age", regexp_replace(col("Age").cast("string"), r"\D", ""))
+
+    # Filter Age between 0 and 130
+    df = df.filter((col("Age") >= 0) & (col("Age") <= 130))
+
+    # Replace non-alphabetic starting values in Occupation with "Unknown"
+    df = df.withColumn("Occupation", when(
+        col("Occupation").isNull() | ~col("Occupation").rlike(r"^[A-Za-z]"),
+        "Unknown"
+    ).otherwise(col("Occupation")))
+
+    # Drop Name and SSN columns
+    df = df.drop("Name", "SSN")
+
+    # Enforce schema / data type
+    for column, new_type in column_type_map.items():
+        df = df.withColumn(column, col(column).cast(new_type))
+
+    return df
+
+def clean_clickstream(df):
+    column_type_map = {
+    "fe_1": IntegerType(),
+    "fe_2": IntegerType(),
+    "fe_3": IntegerType(),
+    "fe_4": IntegerType(),
+    "fe_5": IntegerType(),
+    "fe_6": IntegerType(),
+    "fe_7": IntegerType(),
+    "fe_8": IntegerType(),
+    "fe_9": IntegerType(),
+    "fe_10": IntegerType(),
+    "fe_11": IntegerType(),
+    "fe_12": IntegerType(),
+    "fe_13": IntegerType(),
+    "fe_14": IntegerType(),
+    "fe_15": IntegerType(),
+    "fe_16": IntegerType(),
+    "fe_17": IntegerType(),
+    "fe_18": IntegerType(),
+    "fe_19": IntegerType(),
+    "fe_20": IntegerType(),
+    "Customer_ID": StringType(),
+    "snapshot_date": DateType(),
+}
         
-        numeric = pd.to_numeric(finance_df["Credit_History_Age"], errors='coerce')
-        
-        # Extract numeric components from text
-        y = finance_df["Credit_History_Age"].str.extract(r'(?i)(\d+)\s*year', expand=False).astype(float).fillna(0)
-        m = finance_df["Credit_History_Age"].str.extract(r'(?i)(\d+)\s* month', expand=False).astype(float).fillna(0)
-        
-        # Add numeric to df
-        finance_df["Credit_History_Age_Num"] = y.mul(365).add(m.mul(30)).fillna(numeric).astype(int)
-        
-        # Dropping null values and replacing empty cells with Unknown
-        finance_df = finance_df[finance_df["Credit_Mix"].notnull()]
-        finance_df["Credit_Mix"] = finance_df["Credit_Mix"].astype(str).str.replace(r"^[^A-Za-z]+", "Unknown", regex=True)
-        
-        # Removing non values
-        finance_df = finance_df[finance_df["Payment_Behaviour"].notnull()]
-        finance_df["Payment_Behaviour"] = finance_df["Payment_Behaviour"].astype(str).str.replace(r"^[^A-Za-z]+", "Unknown", regex=True)
-        
-        # Dropping unneeded columns
-        finance_df = finance_df.drop(columns=["Type_of_Loan", "Credit_History_Age"])
+    # Enforce schema / data type
+    for column, new_type in column_type_map.items():
+        df = df.withColumn(column, col(column).cast(new_type))
+
+    return df
+
+# def loan_daily_get_last_snap(df):
+#     # Ensure snapshot_date is a DateType (to avoid errors in future)
+#     df = df.withColumn("snapshot_date", col("snapshot_date").cast(DateType()))
+
+#     # Partition by Customer_ID, order by snapshot_date descending
+#     w = Window.partitionBy("Customer_ID").orderBy(desc("snapshot_date"))
+
+#     # Ranking records
+#     df = df.withColumn("row_num", row_number().over(w))
+
+#     # Get the number 1 record (which should be latest)
+#     df_latest = df.filter(col("row_num") == 1).drop("row_num")
+
+#     return df_latest
+
+
+
+# def clean_loan_daily(df):
+#     # clean data: enforce schema / data type
+#     # Dictionary specifying columns and their desired datatypes
+#     column_type_map = {
+#         "loan_id": StringType(),
+#         "Customer_ID": StringType(),
+#         "loan_start_date": DateType(),
+#         "tenure": IntegerType(),
+#         "installment_num": IntegerType(),
+#         "loan_amt": FloatType(),
+#         "due_amt": FloatType(),
+#         "paid_amt": FloatType(),
+#         "overdue_amt": FloatType(),
+#         "balance": FloatType(),
+#         "snapshot_date": DateType(),
+#     }
+
+#     for column, new_type in column_type_map.items():
+#         df = df.withColumn(column, col(column).cast(new_type))
+
+#     # augment data: add month on book
+#     df = df.withColumn("mob", col("installment_num").cast(IntegerType()))
+
+#     # augment data: add days past due
+#     df = df.withColumn("installments_missed", F.ceil(col("overdue_amt") / col("due_amt")))
+#     df = df.withColumn("installments_missed", coalesce(col("installments_missed"), lit(0)).cast(IntegerType()))
+#     df = df.withColumn("first_missed_date", F.when(col("installments_missed") > 0, F.add_months(col("snapshot_date"), -1 * col("installments_missed"))).cast(DateType()))
+#     df = df.withColumn("dpd", F.when(col("overdue_amt") > 0.0, F.datediff(col("snapshot_date"), col("first_missed_date"))).otherwise(0).cast(IntegerType()))
+
+#     return df
