@@ -172,3 +172,22 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# OS/system trash folder (if accidentally inside repo)
+.Trash0/
+.trash0/
+.Trash*/
+.trash*/
+
+# Ignore datamart to save space
+datamart/
+
+#Mac specific files
+.DS_Store
