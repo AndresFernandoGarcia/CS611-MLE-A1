@@ -71,34 +71,34 @@ for date_str in dates_str_lst:
     utils.data_processing_bronze_table.process_bronze_table(date_str, bronze_lms_directory, spark)
 
 
-# create silver datalake
-silver_loan_daily_directory = "datamart/silver/loan_daily/"
+# # create silver datalake
+# silver_loan_daily_directory = "datamart/silver/loan_daily/"
 
-if not os.path.exists(silver_loan_daily_directory):
-    os.makedirs(silver_loan_daily_directory)
+# if not os.path.exists(silver_loan_daily_directory):
+#     os.makedirs(silver_loan_daily_directory)
 
-# run silver backfill
-for date_str in dates_str_lst:
-    utils.data_processing_silver_table.process_silver_table(date_str, bronze_lms_directory, silver_loan_daily_directory, spark)
-
-
-# create gold datalake
-gold_label_store_directory = "datamart/gold/label_store/"
-
-if not os.path.exists(gold_label_store_directory):
-    os.makedirs(gold_label_store_directory)
-
-# run gold backfill
-for date_str in dates_str_lst:
-    utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
+# # run silver backfill
+# for date_str in dates_str_lst:
+#     utils.data_processing_silver_table.process_silver_table(date_str, silver_loan_daily_directory, spark)
 
 
-folder_path = gold_label_store_directory
-files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
-df = spark.read.option("header", "true").parquet(*files_list)
-print("row_count:",df.count())
+# # create gold datalake
+# gold_label_store_directory = "datamart/gold/label_store/"
 
-df.show()
+# if not os.path.exists(gold_label_store_directory):
+#     os.makedirs(gold_label_store_directory)
+
+# # run gold backfill
+# for date_str in dates_str_lst:
+#     utils.data_processing_gold_table.process_labels_gold_table(date_str, silver_loan_daily_directory, gold_label_store_directory, spark, dpd = 30, mob = 6)
+
+
+# folder_path = gold_label_store_directory
+# files_list = [folder_path+os.path.basename(f) for f in glob.glob(os.path.join(folder_path, '*'))]
+# df = spark.read.option("header", "true").parquet(*files_list)
+# print("row_count:",df.count())
+
+# df.show()
 
 
 
